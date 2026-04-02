@@ -1,3 +1,5 @@
+`Gno.land` · `Smart Contracts` · `Infrastructure`
+
 # permission_registry
 
 Shared, on-chain permission management for Gno.land realms.
@@ -113,5 +115,20 @@ gnokey query vm/qeval --data 'gno.land/r/permission_registry.GetPermissions("my_
 ```
 
 Visit `/r/permission_registry` on any Gno.land node to see all resources, admins, and permission tables.
+
+## Stack
+
+- [Gno](https://gno.land) — Go-like smart contract language
+- [Gno.land](https://gno.land) — Layer 1 blockchain
+
+## Part of the Gno Infrastructure Stack
+
+| Realm | Layer |
+|-------|-------|
+| [fee_split](https://github.com/SillyZir/fee-split) | Revenue & value flow |
+| **permission_registry** | **Access control** |
+| [service_registry](https://github.com/SillyZir/service_registry) | Discovery |
+| [upgrade_registry](https://github.com/SillyZir/upgrade_registry) | Upgrade tracking |
+| [timelock_guardian](https://github.com/SillyZir/timelock_guardian) | Security |
 
 ---
