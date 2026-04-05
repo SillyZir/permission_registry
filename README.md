@@ -105,11 +105,13 @@ This decouples access control from business logic. The token realm doesn't maint
 | `Has(resource, perm, addr)` | Anyone | Check if address holds a permission. Returns bool. |
 | `GetPermissions(resource, addr)` | Anyone | List all permissions for an address on a resource. |
 | `GetAdmin(resource)` | Anyone | Get the admin address of a resource. |
+| `ListResources()` | Anyone | All registered resource names in registration order. |
 | `Render(path)` | Anyone | Markdown table of all resources and permissions. |
 
 ## Query on Gno.land
 
 ```
+gnokey query vm/qeval --data 'gno.land/r/permission_registry.ListResources()' --remote <rpc>
 gnokey query vm/qeval --data 'gno.land/r/permission_registry.Has("my_token", "mint", "g1alice...")' --remote <rpc>
 gnokey query vm/qeval --data 'gno.land/r/permission_registry.GetPermissions("my_token", "g1alice...")' --remote <rpc>
 ```

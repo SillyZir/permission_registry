@@ -8,6 +8,10 @@ import (
 // resources maps a resource name to the admin address that controls it.
 var resources map[string]std.Address
 
+// resourceNames tracks the insertion-ordered list of resource names so
+// ListResources can iterate without scanning the map.
+var resourceNames []string
+
 // permissions maps resource -> permission -> address -> granted.
 // Three-level nesting gives O(1) lookup for Has().
 var permissions map[string]map[string]map[std.Address]bool
@@ -18,6 +22,7 @@ var permList map[string][]string
 
 func init() {
 	resources = make(map[string]std.Address)
+	resourceNames = []string{}
 	permissions = make(map[string]map[string]map[std.Address]bool)
 	permList = make(map[string][]string)
 }
@@ -52,6 +57,7 @@ func CreateResource(cross realm, resourceName string) {
 	}
 
 	resources[resourceName] = caller()
+	resourceNames = append(resourceNames, resourceName)
 	permissions[resourceName] = make(map[string]map[std.Address]bool)
 	permList[resourceName] = []string{}
 }
@@ -138,6 +144,15 @@ func GetPermissions(resourceName string, addr std.Address) string {
 		return "none"
 	}
 	return strings.Join(result, ", ")
+}
+
+// ListResources returns all registered resource names as a comma-separated
+// string in registration order. Returns "none" if no resources exist.
+func ListResources() string {
+	if len(resourceNames) == 0 {
+		return "none"
+	}
+	return strings.Join(resourceNames, ", ")
 }
 
 // GetAdmin returns the admin address of a resource.
