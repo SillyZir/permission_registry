@@ -175,7 +175,8 @@ func Render(path string) string {
 	var b strings.Builder
 	b.WriteString("# Permission Registry\n\n")
 
-	for name, admin := range resources {
+	for _, name := range resourceNames {
+		admin := resources[name]
 		b.WriteString("## " + name + "\n\n")
 		b.WriteString("**Admin:** `" + string(admin) + "`\n\n")
 
