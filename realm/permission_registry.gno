@@ -48,7 +48,7 @@ func mustBeAdmin(resource string) {
 // CreateResource registers a new named resource. The caller becomes its
 // admin and is the only address that can grant or revoke permissions on
 // it. Panics if the name is empty or already taken.
-func CreateResource(cross realm, resourceName string) {
+func CreateResource(_ realm, resourceName string) {
 	if resourceName == "" {
 		panic("resource name must not be empty")
 	}
@@ -65,7 +65,7 @@ func CreateResource(cross realm, resourceName string) {
 // Grant gives an address a named permission on a resource. Only the
 // resource admin can call this. Panics if the permission is already
 // granted to avoid silent no-ops.
-func Grant(cross realm, resourceName, permission string, addr std.Address) {
+func Grant(_ realm, resourceName, permission string, addr std.Address) {
 	mustBeAdmin(resourceName)
 	if permission == "" {
 		panic("permission name must not be empty")
@@ -88,7 +88,7 @@ func Grant(cross realm, resourceName, permission string, addr std.Address) {
 
 // Revoke removes a permission from an address. Only the resource admin
 // can call this. Panics if the permission was not granted.
-func Revoke(cross realm, resourceName, permission string, addr std.Address) {
+func Revoke(_ realm, resourceName, permission string, addr std.Address) {
 	mustBeAdmin(resourceName)
 
 	perms := permissions[resourceName]
@@ -100,7 +100,7 @@ func Revoke(cross realm, resourceName, permission string, addr std.Address) {
 
 // TransferAdmin hands administrative control of a resource to a new
 // address. Only the current admin can call this.
-func TransferAdmin(cross realm, resourceName string, newAdmin std.Address) {
+func TransferAdmin(_ realm, resourceName string, newAdmin std.Address) {
 	mustBeAdmin(resourceName)
 	if newAdmin == "" {
 		panic("new admin must not be empty")
