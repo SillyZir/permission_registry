@@ -1,6 +1,7 @@
 package permission_registry
 
 import (
+	"sort"
 	"std"
 	"strings"
 )
@@ -197,8 +198,12 @@ func Render(path string) string {
 			var addrs []string
 			for addr := range holders {
 				if holders[addr] {
-					addrs = append(addrs, "`"+string(addr)+"`")
+					addrs = append(addrs, string(addr))
 				}
+			}
+			sort.Strings(addrs)
+			for i, a := range addrs {
+				addrs[i] = "`" + a + "`"
 			}
 			b.WriteString("| " + perm + " | " + strings.Join(addrs, ", ") + " |\n")
 		}
