@@ -303,3 +303,26 @@ func TestReservation_OriginalCreatorCanReclaim(cur realm, t *testing.T) {
 	CreateResource(cross, "vault")
 	uassert.Equal(t, string(admin), GetAdmin("vault"))
 }
+
+// ---------- round-3 audit regressions (2026-09-02) ----------
+
+func TestReservation_CreatorSurvivesHostileRecycle(cur realm, t *testing.T) {
+	resetState()
+	createVault()
+
+	// round-3 P2: hostile admin-transferee deletes and INSTANTLY
+	// re-creates — the original creator must survive the recycle
+	testing.SetRealm(testing.NewUserRealm(admin))
+	TransferAdmin(cross, "vault", attacker)
+	testing.SetRealm(testing.NewUserRealm(attacker))
+	DeleteResource(cross, "vault")
+	CreateResource(cross, "vault")
+	uassert.Equal(t, string(admin), string(resourceCreators["vault"]),
+		"in-window re-create must preserve the original creator")
+
+	// so when the attacker abandons again, the original can reclaim
+	DeleteResource(cross, "vault")
+	testing.SetRealm(testing.NewUserRealm(admin))
+	CreateResource(cross, "vault")
+	uassert.Equal(t, string(admin), GetAdmin("vault"))
+}

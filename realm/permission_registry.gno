@@ -113,10 +113,19 @@ func CreateResource(_ realm, resourceName string) {
 	if _, exists := resources[resourceName]; exists {
 		panic("resource already exists: " + resourceName)
 	}
+	creator := caller()
 	if res, wasRetired := retired[resourceName]; wasRetired {
 		c := caller()
-		if c != res.Admin && c != res.Creator && !time.Now().After(res.Expires) {
+		inWindow := !time.Now().After(res.Expires)
+		if c != res.Admin && c != res.Creator && inWindow {
 			panic("resource name is reserved for its former admin: " + resourceName)
+		}
+		// round-3 audit: an in-window re-create must PRESERVE the
+		// original creator — otherwise a hostile admin-transferee could
+		// delete and instantly re-create, erasing the original project's
+		// reclaim right for every future cycle
+		if inWindow && res.Creator != "" {
+			creator = res.Creator
 		}
 	}
 	if len(resources) >= MaxResources {
@@ -124,7 +133,7 @@ func CreateResource(_ realm, resourceName string) {
 	}
 
 	resources[resourceName] = caller()
-	resourceCreators[resourceName] = caller()
+	resourceCreators[resourceName] = creator
 	resourceNames = append(resourceNames, resourceName)
 	permissions[resourceName] = make(map[string]map[address]bool)
 	permList[resourceName] = []string{}
