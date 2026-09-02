@@ -98,7 +98,8 @@ This decouples access control from business logic. The token realm doesn't maint
 
 | Function | Access | Description |
 |----------|--------|-------------|
-| `CreateResource(cross, name)` | Anyone | Register a resource. Caller becomes admin. |
+| `CreateResource(cross, name)` | Anyone | Register a resource. Caller becomes admin. Deleted names stay reserved for their former admin. |
+| `DeleteResource(cross, name)` | Admin | Remove a resource and all its permissions; the name stays reserved for the caller. |
 | `Grant(cross, resource, perm, addr)` | Admin | Grant a permission to an address. |
 | `Revoke(cross, resource, perm, addr)` | Admin | Remove a permission from an address. |
 | `TransferAdmin(cross, resource, newAdmin)` | Admin | Hand off admin control. |

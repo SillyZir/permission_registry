@@ -1,13 +1,21 @@
 package permission_registry
 
 import (
+	"chain/runtime"
 	"sort"
-	"std"
+	"strconv"
 	"strings"
 )
 
+const (
+	MaxResources              = 200
+	MaxPermissionsPerResource = 50
+	MaxHoldersPerPermission   = 200
+	MaxNameLen                = 64
+)
+
 // resources maps a resource name to the admin address that controls it.
-var resources map[string]std.Address
+var resources map[string]address
 
 // resourceNames tracks the insertion-ordered list of resource names so
 // ListResources can iterate without scanning the map.
@@ -15,22 +23,29 @@ var resourceNames []string
 
 // permissions maps resource -> permission -> address -> granted.
 // Three-level nesting gives O(1) lookup for Has().
-var permissions map[string]map[string]map[std.Address]bool
+var permissions map[string]map[string]map[address]bool
 
 // permList tracks the ordered list of distinct permission names per
 // resource, so GetPermissions can iterate without scanning the full map.
 var permList map[string][]string
 
+// retired maps a deleted resource name to its last admin. Only that
+// admin may re-create the name: consumers authorize against resource
+// names, so a freed name must not be claimable by an attacker who
+// would then control every consumer's authorization decisions.
+var retired map[string]address
+
 func init() {
-	resources = make(map[string]std.Address)
+	resources = make(map[string]address)
 	resourceNames = []string{}
-	permissions = make(map[string]map[string]map[std.Address]bool)
+	permissions = make(map[string]map[string]map[address]bool)
 	permList = make(map[string][]string)
+	retired = make(map[string]address)
 }
 
 // caller returns the address of the immediate external caller.
-func caller() std.Address {
-	return std.PreviousRealm().Address()
+func caller() address {
+	return runtime.PreviousRealm().Address()
 }
 
 // mustBeAdmin panics if the caller is not the admin of the resource.
@@ -44,52 +59,105 @@ func mustBeAdmin(resource string) {
 	}
 }
 
+// isValidName restricts resource and permission names to lowercase
+// alphanumeric with underscores. Beyond hygiene this is a security
+// property: names appear in composite trust decisions and rendered
+// output, so no delimiter or markdown character may enter one.
+func isValidName(name string) bool {
+	if name == "" || len(name) > MaxNameLen {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func nameRuleText(kind string) string {
+	return kind + " name must be 1-" + strconv.Itoa(MaxNameLen) +
+		" chars, lowercase alphanumeric with underscores only"
+}
+
 // ---------- write operations ----------
 
 // CreateResource registers a new named resource. The caller becomes its
 // admin and is the only address that can grant or revoke permissions on
-// it. Panics if the name is empty or already taken.
+// it. A deleted resource name stays reserved for its former admin.
 func CreateResource(_ realm, resourceName string) {
-	if resourceName == "" {
-		panic("resource name must not be empty")
+	if !isValidName(resourceName) {
+		panic(nameRuleText("resource"))
 	}
 	if _, exists := resources[resourceName]; exists {
 		panic("resource already exists: " + resourceName)
 	}
+	if prev, wasRetired := retired[resourceName]; wasRetired && prev != caller() {
+		panic("resource name is reserved for its former admin: " + resourceName)
+	}
+	if len(resources) >= MaxResources {
+		panic("global resource limit reached")
+	}
 
 	resources[resourceName] = caller()
 	resourceNames = append(resourceNames, resourceName)
-	permissions[resourceName] = make(map[string]map[std.Address]bool)
+	permissions[resourceName] = make(map[string]map[address]bool)
 	permList[resourceName] = []string{}
+	delete(retired, resourceName)
+}
+
+// DeleteResource removes a resource and every permission under it. Only
+// the resource admin can call this. The name stays reserved for the
+// caller: nobody else can re-create it and inherit its consumers.
+func DeleteResource(_ realm, resourceName string) {
+	mustBeAdmin(resourceName)
+
+	retired[resourceName] = resources[resourceName]
+	delete(resources, resourceName)
+	delete(permissions, resourceName)
+	delete(permList, resourceName)
+	for i, n := range resourceNames {
+		if n == resourceName {
+			resourceNames = append(resourceNames[:i], resourceNames[i+1:]...)
+			break
+		}
+	}
 }
 
 // Grant gives an address a named permission on a resource. Only the
 // resource admin can call this. Panics if the permission is already
 // granted to avoid silent no-ops.
-func Grant(_ realm, resourceName, permission string, addr std.Address) {
+func Grant(_ realm, resourceName, permission string, addr address) {
 	mustBeAdmin(resourceName)
-	if permission == "" {
-		panic("permission name must not be empty")
+	if !isValidName(permission) {
+		panic(nameRuleText("permission"))
 	}
-	if addr == "" {
-		panic("address must not be empty")
+	if addr == "" || !addr.IsValid() {
+		panic("invalid address: " + string(addr))
 	}
 
 	perms := permissions[resourceName]
 	if perms[permission] == nil {
-		perms[permission] = make(map[std.Address]bool)
+		if len(permList[resourceName]) >= MaxPermissionsPerResource {
+			panic("permission limit reached for resource " + resourceName)
+		}
+		perms[permission] = make(map[address]bool)
 		permList[resourceName] = append(permList[resourceName], permission)
 	}
 
 	if perms[permission][addr] {
 		panic("permission already granted: " + permission + " to " + string(addr))
 	}
+	if len(perms[permission]) >= MaxHoldersPerPermission {
+		panic("holder limit reached for permission " + permission)
+	}
 	perms[permission][addr] = true
 }
 
 // Revoke removes a permission from an address. Only the resource admin
-// can call this. Panics if the permission was not granted.
-func Revoke(_ realm, resourceName, permission string, addr std.Address) {
+// can call this. Panics if the permission was not granted. A permission
+// left with no holders is pruned from the resource's permission list.
+func Revoke(_ realm, resourceName, permission string, addr address) {
 	mustBeAdmin(resourceName)
 
 	perms := permissions[resourceName]
@@ -97,14 +165,24 @@ func Revoke(_ realm, resourceName, permission string, addr std.Address) {
 		panic("permission not granted: " + permission + " to " + string(addr))
 	}
 	delete(perms[permission], addr)
+
+	if len(perms[permission]) == 0 {
+		delete(perms, permission)
+		for i, p := range permList[resourceName] {
+			if p == permission {
+				permList[resourceName] = append(permList[resourceName][:i], permList[resourceName][i+1:]...)
+				break
+			}
+		}
+	}
 }
 
 // TransferAdmin hands administrative control of a resource to a new
 // address. Only the current admin can call this.
-func TransferAdmin(_ realm, resourceName string, newAdmin std.Address) {
+func TransferAdmin(_ realm, resourceName string, newAdmin address) {
 	mustBeAdmin(resourceName)
-	if newAdmin == "" {
-		panic("new admin must not be empty")
+	if newAdmin == "" || !newAdmin.IsValid() {
+		panic("invalid new admin address: " + string(newAdmin))
 	}
 	resources[resourceName] = newAdmin
 }
@@ -113,7 +191,7 @@ func TransferAdmin(_ realm, resourceName string, newAdmin std.Address) {
 
 // Has returns true if addr holds the named permission on the resource.
 // Returns false (never panics) for unknown resources or permissions.
-func Has(resourceName, permission string, addr std.Address) bool {
+func Has(resourceName, permission string, addr address) bool {
 	perms, exists := permissions[resourceName]
 	if !exists {
 		return false
@@ -128,7 +206,7 @@ func Has(resourceName, permission string, addr std.Address) bool {
 // GetPermissions returns all permission names granted to addr on a
 // resource, as a comma-separated string. Returns "none" if the address
 // has no permissions.
-func GetPermissions(resourceName string, addr std.Address) string {
+func GetPermissions(resourceName string, addr address) string {
 	perms, exists := permissions[resourceName]
 	if !exists {
 		return "none"
