@@ -22,7 +22,8 @@ func resetState() {
 	resourceNames = []string{}
 	permissions = make(map[string]map[string]map[address]bool)
 	permList = make(map[string][]string)
-	retired = make(map[string]address)
+	retired = make(map[string]*Reservation)
+	resourceCreators = make(map[string]address)
 }
 
 func createVault() {
@@ -260,4 +261,45 @@ func TestRender(cur realm, t *testing.T) {
 	uassert.True(t, strings.Contains(out, "## vault"), "render must show the resource")
 	uassert.True(t, strings.Contains(out, "withdraw"), "render must show the permission")
 	uassert.True(t, strings.Contains(out, string(alice)), "render must show the holder")
+}
+
+// ---------- re-audit regressions (2026-09-02) ----------
+
+func skipSeconds(sec int64) {
+	testing.SkipHeights((sec + 4) / 5)
+}
+
+func TestReservation_ExpiresAndFreesTheName(cur realm, t *testing.T) {
+	resetState()
+	createVault()
+	testing.SetRealm(testing.NewUserRealm(admin))
+	DeleteResource(cross, "vault")
+
+	// re-audit P1: within the window the name stays reserved...
+	testing.SetRealm(testing.NewUserRealm(attacker))
+	uassert.AbortsWithMessage(t,
+		"resource name is reserved for its former admin: vault",
+		func() { CreateResource(cross, "vault") },
+	)
+
+	// ...after expiry it frees for anyone
+	skipSeconds(ReservationPeriod + 10)
+	CreateResource(cross, "vault")
+	uassert.Equal(t, string(attacker), GetAdmin("vault"))
+}
+
+func TestReservation_OriginalCreatorCanReclaim(cur realm, t *testing.T) {
+	resetState()
+	createVault()
+
+	// re-audit P2: hostile admin-transferee deletes the resource — the
+	// ORIGINAL creator can still re-create during the window
+	testing.SetRealm(testing.NewUserRealm(admin))
+	TransferAdmin(cross, "vault", attacker)
+	testing.SetRealm(testing.NewUserRealm(attacker))
+	DeleteResource(cross, "vault")
+
+	testing.SetRealm(testing.NewUserRealm(admin))
+	CreateResource(cross, "vault")
+	uassert.Equal(t, string(admin), GetAdmin("vault"))
 }

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -12,7 +13,20 @@ const (
 	MaxPermissionsPerResource = 50
 	MaxHoldersPerPermission   = 200
 	MaxNameLen                = 64
+
+	// ReservationPeriod is how long a deleted resource name stays
+	// reserved. Finite (re-audit 2026-09-02): eternal tombstones let an
+	// attacker cycle create/delete to lock the namespace forever.
+	ReservationPeriod = int64(90 * 24 * 3600) // 90 days
 )
+
+// Reservation holds a deleted resource name for its former admin AND
+// its original creator, and expires.
+type Reservation struct {
+	Admin   address
+	Creator address
+	Expires time.Time
+}
 
 // resources maps a resource name to the admin address that controls it.
 var resources map[string]address
@@ -29,18 +43,25 @@ var permissions map[string]map[string]map[address]bool
 // resource, so GetPermissions can iterate without scanning the full map.
 var permList map[string][]string
 
-// retired maps a deleted resource name to its last admin. Only that
-// admin may re-create the name: consumers authorize against resource
-// names, so a freed name must not be claimable by an attacker who
-// would then control every consumer's authorization decisions.
-var retired map[string]address
+// retired maps a deleted resource name to its time-bounded
+// reservation. Consumers authorize against resource names, so a
+// freed name must not be claimable by an attacker while integrators
+// may still reference it — but the hold expires so tombstones cannot
+// lock the namespace forever.
+var retired map[string]*Reservation
+
+// resourceCreators records each resource's ORIGINAL creator,
+// immutable through admin transfers, so a hostile admin-transferee
+// cannot permanently strand a name against the project that made it.
+var resourceCreators map[string]address
 
 func init() {
 	resources = make(map[string]address)
 	resourceNames = []string{}
 	permissions = make(map[string]map[string]map[address]bool)
 	permList = make(map[string][]string)
-	retired = make(map[string]address)
+	retired = make(map[string]*Reservation)
+	resourceCreators = make(map[string]address)
 }
 
 // caller returns the address of the immediate external caller.
@@ -92,14 +113,18 @@ func CreateResource(_ realm, resourceName string) {
 	if _, exists := resources[resourceName]; exists {
 		panic("resource already exists: " + resourceName)
 	}
-	if prev, wasRetired := retired[resourceName]; wasRetired && prev != caller() {
-		panic("resource name is reserved for its former admin: " + resourceName)
+	if res, wasRetired := retired[resourceName]; wasRetired {
+		c := caller()
+		if c != res.Admin && c != res.Creator && !time.Now().After(res.Expires) {
+			panic("resource name is reserved for its former admin: " + resourceName)
+		}
 	}
 	if len(resources) >= MaxResources {
 		panic("global resource limit reached")
 	}
 
 	resources[resourceName] = caller()
+	resourceCreators[resourceName] = caller()
 	resourceNames = append(resourceNames, resourceName)
 	permissions[resourceName] = make(map[string]map[address]bool)
 	permList[resourceName] = []string{}
@@ -112,8 +137,13 @@ func CreateResource(_ realm, resourceName string) {
 func DeleteResource(_ realm, resourceName string) {
 	mustBeAdmin(resourceName)
 
-	retired[resourceName] = resources[resourceName]
+	retired[resourceName] = &Reservation{
+		Admin:   resources[resourceName],
+		Creator: resourceCreators[resourceName],
+		Expires: time.Now().Add(time.Duration(ReservationPeriod) * time.Second),
+	}
 	delete(resources, resourceName)
+	delete(resourceCreators, resourceName)
 	delete(permissions, resourceName)
 	delete(permList, resourceName)
 	for i, n := range resourceNames {
